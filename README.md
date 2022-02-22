@@ -17,19 +17,19 @@ The following python packages are required:
 * os
 * sys
 * sqlalchemy
-* pandas
-* numpy
-* datetime
-* csv
-* scipy
-* math
 * matplotlib
+* numpy
+* math
+* statistics
+* scipy
+* time
+* datetime
+* pandas
 * geopandas
 * trackintel
 * skmob
-* haversine
 * scikit-learn
-* statsmodels
+* statmodels
 * skgarden (! not under good maintenance currently, consider to install directly by git install command)
 ```
 
@@ -52,7 +52,7 @@ The following python packages are required:
    - compare_three_charging_onpeakdef2.py: plot load profile of three charging strategies
 
 ## Connections
-   - The results of Table 2. and Table 3. were returned from the file compare_probablistic_results.py. 
-   - The results of Table 4. were calculated from the file calculate_feature_importance.py. 
-   - The results of Table 5. and Table 6. were summarized from the results of files compare_baseline_unismart.py and compare_baseline_bismart.py. 
-   - The plot of Fig. 2. was from the file compare_three_charging_onpeakdef2.py.
+   - The results of Table 2. and Table 3. in the paper were returned from the file compare_probablistic_results.py. 
+   - The results of Table 4. in the paper were calculated from the file calculate_feature_importance.py. 
+   - The results of Table 5. and Table 6. in the paper were summarized from the results of files compare_baseline_unismart.py and compare_baseline_bismart.py. 
+   - The plot of Fig. 2. in the paper was from the file compare_three_charging_onpeakdef2.py.
