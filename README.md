@@ -52,7 +52,7 @@ The following python packages are required:
    - compare_three_charging_onpeakdef2.py: plot load profile of three charging strategies
 
 ## Connections
-   - The results of Table 2., Table 3., and Table 4. in the paper were returned from the file compare_probablistic_results.py. 
-   - The results of Table 5. in the paper were calculated from the file calculate_feature_importance.py. 
+   - The results of Table 2., Table 3., and Table 4. in the paper were summarized from the file compare_probablistic_results.py. 
+   - The results of Table 5. in the paper were returned from the file calculate_feature_importance.py. 
    - The results of Table 6. and Table 7. in the paper were summarized from the results of files compare_baseline_unismart.py and compare_baseline_bismart.py. 
    - The plot of Fig. 2. in the paper was from the file compare_three_charging_onpeakdef2.py.
