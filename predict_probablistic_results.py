@@ -141,12 +141,13 @@ def cal_feat_importance(model, X, user, mob_flag, plotfig_flag, savefig_flag):
     
     return importance
 
-def predict_interval(test_feat, ev_feats, data_type, model_type, mob_flag, quan_list, userlist, save_flag, INPUT_PATH, PREDICTION_PATH):
+def predict_interval(cv_flag, test_feat, ev_feats, data_type, model_type, mob_flag, quan_list, userlist, save_flag, INPUT_PATH, PREDICTION_PATH):
     """
     Predict quantile regression for three targets.
     
     Paramaters
     ----------
+    cv_flag: : boolean, flag indicating whether to run cross validation
     test_feat : list, mobility features to be evaluated
     ev_feats : list, ev-related features (only by used in soc prediction)
     data_type : list, three types of targets
@@ -450,67 +451,75 @@ def predict_interval(test_feat, ev_feats, data_type, model_type, mob_flag, quan_
             X_scaled = minmax_scaler.transform(X)
             
         ## MODEL 1: LQG MODEL
-        if model_type == 'lqr':    
-            model_cv = []
+        if model_type == 'lqr':
             
-            # interate over all model hyperparameters
-            alphas = [0.001, 0.01, 0.1, 1, 10, 100, 1000]
-    
-            for alphas_cv in alphas:
-                model = QuantileRegressor(alpha=alphas_cv, solver='highs')
-                model_cv.append(model)
-                                    
-            quanloss_val = [] 
-            quanloss_val_cv = []            
-            user_cv_time = []
-            cv_split_len = len(X_train)
-            
-            # start cross validation
-            for model_cv_loop in model_cv:
-                start_cv = time()
+            if cv_flag == True:
+                model_cv = []
                 
-                for kfold in range(1,6):
-    
-                    val_split_lower = int(np.ceil(cv_split_len*(1-kfold/5)))
-                    val_split_upper = int(np.ceil(cv_split_len*(1-(kfold-1)/5)))
-                    train_idx = list(set(range(0,cv_split_len))-set(range(val_split_lower,val_split_upper)))
-                    
-                    X_train_cv = X_train.loc[train_idx, ].copy()
-                    y_train_cv = y_train.loc[train_idx, ].copy()
+                # interate over all model hyperparameters
+                alphas = [0.001, 0.01, 0.1, 1, 10, 100, 1000]
         
-                    X_val = X_train.loc[val_split_lower:val_split_upper, ].copy()
-                    y_val = y_train.loc[val_split_lower:val_split_upper, ].copy()
-                  
-                    # validate on validatoin dataset
-                    y_val_pred = pd.DataFrame(y_val)
-                    y_val_pred  = y_val_pred.rename(columns={truecol_name:'true'}) 
+                for alphas_cv in alphas:
+                    model = QuantileRegressor(alpha=alphas_cv, solver='highs')
+                    model_cv.append(model)
+                                        
+                quanloss_val = [] 
+                quanloss_val_cv = []            
+                user_cv_time = []
+                cv_split_len = len(X_train)
+            
+                # start cross validation
+                for model_cv_loop in model_cv:
+                    start_cv = time()
                     
-                    for quan in quan_list:
-                        model_cv_loop = model_cv_loop.set_params(**{'quantile': quan})
-                        model_cv_loop = model_cv_loop.fit(X_train_cv, y_train_cv)
-                        y_val_pred[quan] = model_cv_loop.predict(X_val)
-                        quanloss_val.append(quantile_loss(quan, y_val, y_val_pred[quan]))
+                    for kfold in range(1,6):
+        
+                        val_split_lower = int(np.ceil(cv_split_len*(1-kfold/5)))
+                        val_split_upper = int(np.ceil(cv_split_len*(1-(kfold-1)/5)))
+                        train_idx = list(set(range(0,cv_split_len))-set(range(val_split_lower,val_split_upper)))
+                        
+                        X_train_cv = X_train.loc[train_idx, ].copy()
+                        y_train_cv = y_train.loc[train_idx, ].copy()
+            
+                        X_val = X_train.loc[val_split_lower:val_split_upper, ].copy()
+                        y_val = y_train.loc[val_split_lower:val_split_upper, ].copy()
+                      
+                        # validate on validatoin dataset
+                        y_val_pred = pd.DataFrame(y_val)
+                        y_val_pred  = y_val_pred.rename(columns={truecol_name:'true'}) 
+                        
+                        for quan in quan_list:
+                            model_cv_loop = model_cv_loop.set_params(**{'quantile': quan})
+                            model_cv_loop = model_cv_loop.fit(X_train_cv, y_train_cv)
+                            y_val_pred[quan] = model_cv_loop.predict(X_val)
+                            quanloss_val.append(quantile_loss(quan, y_val, y_val_pred[quan]))
+                    
+                    # print('Cross validation loop: ', model_cv_loop)
+                    print(model_cv_loop)
+                    # print(np.mean(quanloss_val))
+                    quanloss_val_cv.append(np.mean(quanloss_val))
                 
-                print(model_cv_loop)
-                print(mean(quanloss_val))
-                quanloss_val_cv.append(mean(quanloss_val))
+                    end_cv = time()
+                    per_cv_time = end_cv - start_cv
+                    user_cv_time.append(per_cv_time)
+                
+                print('Total time for the user %.3f seconds' % sum(user_cv_time))
+                all_cv_time.append(sum(user_cv_time))
             
-                end_cv = time()
-                per_cv_time = end_cv - start_cv
-                user_cv_time.append(per_cv_time)
+                # find best model with smallest mean quantile loss
+                best_model_idx = quanloss_val_cv.index(min(quanloss_val_cv))
+                model = model_cv[best_model_idx]
+                print(model)            
             
-            print('Total time for the user %.3f seconds' % sum(user_cv_time))
-            all_cv_time.append(sum(user_cv_time))
+                # return deterministic evaluation metrics using Q=0.5 as expectation value
+                model = model.set_params(**{'quantile': 0.5})
+                model = model.fit(X_train_scaled, y_train)
             
-            # find best model with smallest mean quantile loss
-            best_model_idx = quanloss_val_cv.index(min(quanloss_val_cv))
-            best_model = model_cv[best_model_idx]
-            print(best_model)            
-            
-            # return deterministic evaluation metrics using Q=0.5 as expectation value
-            best_model = best_model.set_params(**{'quantile': 0.5})
-            best_model = best_model.fit(X_train_scaled, y_train)
-            y_test_medpred = best_model.predict(X_test_scaled)
+            if cv_flag == False:
+                model = sm.QuantReg(y_train, X_train_scaled)
+                model = model.fit(q=0.5)
+                
+            y_test_medpred = model.predict(X_test_scaled)
 
             r2_medpred = metrics.r2_score(y_test,y_test_medpred)
             mae_medpred = metrics.mean_absolute_error(y_test, y_test_medpred)
@@ -520,15 +529,17 @@ def predict_interval(test_feat, ev_feats, data_type, model_type, mob_flag, quan_
             deter_eval['mae_medpred'].append(mae_medpred)
             deter_eval['rmse_medpred'].append(rmse_medpred)
             
-            # return quantile loss of probablistic prediction on test dataset 
-            best_model = model_cv[best_model_idx] 
+            # return quantile loss of probablistic prediction on test dataset                 
             y_test_pred = pd.DataFrame(y_test)
             y_test_pred= y_test_pred.rename(columns={truecol_name:'true'})
             
             for quan in quan_list:  
-                best_model = best_model.set_params(**{'quantile': quan})
-                best_model = best_model.fit(X_train_scaled, y_train)
-                y_test_pred[quan] = best_model.predict(X_test_scaled)
+                if cv_flag == True:
+                    model = model.set_params(**{'quantile': quan})
+                    model = model.fit(X_train_scaled, y_train)
+                else:
+                    model = sm.QuantReg(y_train, X_train_scaled).fit(q=quan)
+                y_test_pred[quan] = model.predict(X_test_scaled)
 
                 quan_loss_user = quantile_loss(quan, y_test, y_test_pred[quan])
                 quan_loss[quan].append(quan_loss_user)
@@ -538,10 +549,13 @@ def predict_interval(test_feat, ev_feats, data_type, model_type, mob_flag, quan_
             y_pred = y_pred.rename(columns={truecol_name:'true'}) 
                         
             for quan in quan_list:
-                best_model = model_cv[best_model_idx] 
-                best_model = best_model.set_params(**{'quantile': quan})
-                best_model = best_model.fit(X_train_scaled, y_train)
-                y_pred[quan] = best_model.predict(X_scaled)
+                if cv_flag == True:
+                    model = model_cv[best_model_idx] 
+                    model = model.set_params(**{'quantile': quan})
+                    model = model.fit(X_train_scaled, y_train)
+                else:                
+                    model = sm.QuantReg(y_train, X_train_scaled).fit(q=quan)
+                y_pred[quan] = model.predict(X_scaled)
                 
             # limit the range of prediction
             upper_limit = target_limit[1]
@@ -566,78 +580,83 @@ def predict_interval(test_feat, ev_feats, data_type, model_type, mob_flag, quan_
         ## MODEL 2: QRF MODEL
         if model_type=='qrf':
             
-            model_cv = []
-            
-            # interate over all model hyperparameters
-            n_estimators = [100, 200, 300] # number of trees
-            max_depth = [1, 3, 5, 7]
-            max_depth.append(None) # maximum number of levels in tree
-            min_samples_split = [2, 5, 10] # minimum number of samples required to split a node
-            min_samples_leaf = [1, 2, 4] # minimum number of samples required at each leaf node
-    
-            for n_estimators_cv in n_estimators:
-                for max_depth_cv in max_depth:
-                    for min_samples_split_cv in min_samples_split:
-                        for min_samples_leaf_cv in min_samples_leaf:
-                            model = RandomForestQuantileRegressor(random_state=0, n_jobs=-1, 
-                                                                  n_estimators=n_estimators_cv, 
-                                                                  max_depth=max_depth_cv, 
-                                                                   min_samples_split=min_samples_split_cv,
-                                                                   min_samples_leaf=min_samples_leaf_cv
-                                                                  )
-                            model_cv.append(model)
-                                    
-            kf = KFold(n_splits=5, shuffle=True, random_state=0)
-            quanloss_val_cv = []
-            from statistics import mean
-            
-            user_cv_time = []
-            
-            # start cross validation
-            for model_test in model_cv:
-                quanloss_val = [] 
+            if cv_flag == True:
+                model_cv = []
                 
-                start_cv = time()
-                
-                for train_index, val_index in kf.split(X_train):
-                    # split into training dataset and validation dataset
-                    X_train_cv, X_val, y_train_cv, y_val = (X_train.loc[train_index], X_train.loc[val_index], y_train.loc[train_index], y_train.loc[val_index])
-                    
-                    # fit on training dataset
-                    model_test.fit(X_train_cv, y_train_cv)
-                    
-                    # validate on validatoin dataset
-                    y_val_pred = pd.DataFrame(y_val)
-                    y_val_pred = y_val_pred.rename(columns={truecol_name:'true'}) 
-                    
-                    for quan in quan_list:
-                        y_val_pred[quan] = model_test.predict(X_val, quantile=quan*100)
-                        quanloss_val.append(quantile_loss(quan, y_val, y_val_pred[quan]))
-                    
-                quanloss_val_cv.append(mean(quanloss_val))
-                print(model_test)
-                print(mean(quanloss_val))
-  
-                end_cv = time()
-                per_cv_time = end_cv - start_cv
-                print('%.3f seconds' % per_cv_time)
-                user_cv_time.append(per_cv_time)
-            
-            print('Total time for the user %.3f seconds' % sum(user_cv_time))
-            all_cv_time.append(sum(user_cv_time))
-            
-            # find best model with smallest mean quantile loss
-            print('Cross Validation Finished for One Round')
-            best_model_idx = quanloss_val_cv.index(min(quanloss_val_cv))
-            best_model = model_cv[best_model_idx]
-            print(best_model)
-            all_best_model.append(best_model)
+                # interate over all model hyperparameters
+                n_estimators = [100, 200, 300] # number of trees
+                max_depth = [1, 3, 5, 7]
+                max_depth.append(None) # maximum number of levels in tree
+                min_samples_split = [2, 5, 10] # minimum number of samples required to split a node
+                min_samples_leaf = [1, 2, 4] # minimum number of samples required at each leaf node
         
+                for n_estimators_cv in n_estimators:
+                    for max_depth_cv in max_depth:
+                        for min_samples_split_cv in min_samples_split:
+                            for min_samples_leaf_cv in min_samples_leaf:
+                                model = RandomForestQuantileRegressor(random_state=0, n_jobs=-1, 
+                                                                      n_estimators=n_estimators_cv, 
+                                                                      max_depth=max_depth_cv, 
+                                                                       min_samples_split=min_samples_split_cv,
+                                                                       min_samples_leaf=min_samples_leaf_cv
+                                                                      )
+                                model_cv.append(model)
+                                        
+                kf = KFold(n_splits=5, shuffle=True, random_state=0)
+                quanloss_val_cv = []
+                from statistics import mean
+                
+                user_cv_time = []
+                
+                # start cross validation
+                for model_test in model_cv:
+                    quanloss_val = [] 
+                    
+                    start_cv = time()
+                    
+                    for train_index, val_index in kf.split(X_train):
+                        # split into training dataset and validation dataset
+                        X_train_cv, X_val, y_train_cv, y_val = (X_train.loc[train_index], X_train.loc[val_index], y_train.loc[train_index], y_train.loc[val_index])
+                        
+                        # fit on training dataset
+                        model_test.fit(X_train_cv, y_train_cv)
+                        
+                        # validate on validatoin dataset
+                        y_val_pred = pd.DataFrame(y_val)
+                        y_val_pred = y_val_pred.rename(columns={truecol_name:'true'}) 
+                        
+                        for quan in quan_list:
+                            y_val_pred[quan] = model_test.predict(X_val, quantile=quan*100)
+                            quanloss_val.append(quantile_loss(quan, y_val, y_val_pred[quan]))
+                        
+                    quanloss_val_cv.append(mean(quanloss_val))
+                    print(model_test)
+                    # print(mean(quanloss_val))
+      
+                    end_cv = time()
+                    per_cv_time = end_cv - start_cv
+                    # print('%.3f seconds' % per_cv_time)
+                    user_cv_time.append(per_cv_time)
+                
+                print('Total time for the user %.3f seconds' % sum(user_cv_time))
+                all_cv_time.append(sum(user_cv_time))
+            
+                # find best model with smallest mean quantile loss
+                # print('Cross Validation Finished for One Round')
+            
+                best_model_idx = quanloss_val_cv.index(min(quanloss_val_cv))
+                model = model_cv[best_model_idx]
+                print(model)
+                all_best_model.append(model)
+            
+            else:
+                model = RandomForestQuantileRegressor(random_state=0, n_estimators=150, n_jobs=-1, max_depth=None)
+                
             # return deterministic evaluation metrics using Q=0.5 as expectation value
-            best_model = best_model.fit(X_train, y_train)
+            model = model.fit(X_train, y_train)
 
-            y_test_meanpred = best_model.predict(X_test)
-            y_test_medpred = best_model.predict(X_test, quantile=50)
+            y_test_meanpred = model.predict(X_test)
+            y_test_medpred = model.predict(X_test, quantile=50)
             
             r2_meanpred = metrics.r2_score(y_test,y_test_meanpred)
             mae_meanpred = metrics.mean_absolute_error(y_test, y_test_meanpred)
@@ -658,15 +677,19 @@ def predict_interval(test_feat, ev_feats, data_type, model_type, mob_flag, quan_
             y_test_pred = y_test_pred.rename(columns={truecol_name:'true'}) 
 
             for quan in quan_list:
-                best_model = model_cv[best_model_idx]
-                y_test_pred[quan] = best_model.predict(X_test, quantile=quan*100)
+                if cv_flag == True:
+                    model = model_cv[best_model_idx]
+                else:
+                    model = RandomForestQuantileRegressor(random_state=0, n_estimators=150, n_jobs=-1, max_depth=None)
+                model = model.fit(X_train, y_train)
+                y_test_pred[quan] = model.predict(X_test, quantile=quan*100)
                 quan_loss_user = quantile_loss(quan, y_test, y_test_pred[quan])
                 quan_loss[quan].append(quan_loss_user)
             
             # return feature importance
             savefig_flag = False
             plotfig_flag = False
-            importance = cal_feat_importance(best_model, X_train, user, mob_flag, plotfig_flag, savefig_flag)
+            importance = cal_feat_importance(model, X_train, user, mob_flag, plotfig_flag, savefig_flag)
             importances = pd.concat([importances, importance.T], axis=0)
             
             # fit over complete dataset for given quantiles
@@ -674,8 +697,12 @@ def predict_interval(test_feat, ev_feats, data_type, model_type, mob_flag, quan_
             y_pred = y_pred.rename(columns={truecol_name:'true'}) 
             
             for quan in quan_list:
-                best_model = model_cv[best_model_idx]
-                y_pred[quan] = best_model.predict(X, quantile=quan*100)
+                if cv_flag == True:
+                    model = model_cv[best_model_idx]
+                else:
+                    model = RandomForestQuantileRegressor(random_state=0, n_estimators=150, n_jobs=-1, max_depth=None)
+                model = model.fit(X_train, y_train)
+                y_pred[quan] = model.predict(X, quantile=quan*100)
                 
             # limit the range of prediction
             upper_limit = target_limit[1]
@@ -700,88 +727,93 @@ def predict_interval(test_feat, ev_feats, data_type, model_type, mob_flag, quan_
         ## MODEL 3: GBQR MODEL
         if model_type == 'gbqr':
             
-            model_cv = []
-            
-            # interate over all model hyperparameters
-            n_estimators = [100, 200, 300] # number of trees
-            max_depth = [1, 3, 5, 7]
-            learning_rate = [0.1, 0.06, 0.02]
-            subsample = [1.0, 0.8, 0.6]      
-            min_samples_split = [2, 5, 10] # minimum number of samples required to split a node
-            min_samples_leaf = [1, 2, 4] # minimum number of samples required at each leaf node
-    
-            for n_estimators_cv in n_estimators:
-                for max_depth_cv in max_depth:
-                    for learning_rate_cv in learning_rate:
-                        for subsample_cv in subsample:
-                            for min_samples_split_cv in min_samples_split:
-                                for min_samples_leaf_cv in min_samples_leaf:
-                            
-                                    model = GradientBoostingRegressor(loss='quantile', 
-                                                                      n_estimators=n_estimators_cv,
-                                                                      max_depth=max_depth_cv,
-                                                                      learning_rate=learning_rate_cv,
-                                                                      min_samples_split=min_samples_split_cv,
-                                                                      min_samples_leaf=min_samples_leaf_cv
-                                                                      )
-                                    model_cv.append(model)
-                         
-            cv_split_len = len(X_train)
-                    
-            quanloss_val_cv = []
-            user_cv_time = []
-            
-            # start cross validation
-            for model_test in model_cv:
-                print('Model started', model_cv.index(model_test))
-                quanloss_val = [] 
+            if cv_flag == True:
+                model_cv = []
                 
-                start_cv = time()
-                
-                for kfold in range(1,6):
-                    val_split_lower = int(np.ceil(cv_split_len*(1-kfold/5)))
-                    val_split_upper = int(np.ceil(cv_split_len*(1-(kfold-1)/5)))
-                    train_idx = list(set(range(0,cv_split_len))-set(range(val_split_lower,val_split_upper)))
-                    
-                    X_train_cv = X_train.loc[train_idx, ].copy()
-                    y_train_cv = y_train.loc[train_idx, ].copy()
+                # interate over all model hyperparameters
+                n_estimators = [100, 200, 300] # number of trees
+                max_depth = [1, 3, 5, 7]
+                learning_rate = [0.1, 0.06, 0.02]
+                subsample = [1.0, 0.8, 0.6]      
+                min_samples_split = [2, 5, 10] # minimum number of samples required to split a node
+                min_samples_leaf = [1, 2, 4] # minimum number of samples required at each leaf node
         
-                    X_val = X_train.loc[val_split_lower:val_split_upper, ].copy()
-                    y_val = y_train.loc[val_split_lower:val_split_upper, ].copy()
-                    
-                    y_val_pred = pd.DataFrame(y_val)
-                    y_val_pred = y_val_pred.rename(columns={truecol_name:'true'}) 
-                    
-                    for quan in quan_list:
-                        # fit on training dataset
-                        model_test = model_test.set_params(**{'alpha': quan})
-                        model_test.fit(X_train_cv, y_train_cv)
+                for n_estimators_cv in n_estimators:
+                    for max_depth_cv in max_depth:
+                        for learning_rate_cv in learning_rate:
+                            for subsample_cv in subsample:
+                                for min_samples_split_cv in min_samples_split:
+                                    for min_samples_leaf_cv in min_samples_leaf:
+                                
+                                        model = GradientBoostingRegressor(loss='quantile', 
+                                                                          n_estimators=n_estimators_cv,
+                                                                          max_depth=max_depth_cv,
+                                                                          learning_rate=learning_rate_cv,
+                                                                          min_samples_split=min_samples_split_cv,
+                                                                          min_samples_leaf=min_samples_leaf_cv
+                                                                          )
+                                        model_cv.append(model)
+                             
+                cv_split_len = len(X_train)
                         
-                        # validate on validatoin dataset
-                        y_val_pred[quan] = model_test.predict(X_val)
-                        quanloss_val.append(quantile_loss(quan, y_val, y_val_pred[quan]))
+                quanloss_val_cv = []
+                user_cv_time = []
+                
+                # start cross validation
+                for model_test in model_cv:
+                    # print('Model started', model_cv.index(model_test))
+                    quanloss_val = [] 
                     
-                quanloss_val_cv.append(mean(quanloss_val))
-                print(model_test)
-                print(mean(quanloss_val))
-                end_cv = time()
-                per_cv_time = end_cv - start_cv
-                print('%.3f seconds' % per_cv_time)
-                user_cv_time.append(per_cv_time)
+                    start_cv = time()
+                    
+                    for kfold in range(1,6):
+                        val_split_lower = int(np.ceil(cv_split_len*(1-kfold/5)))
+                        val_split_upper = int(np.ceil(cv_split_len*(1-(kfold-1)/5)))
+                        train_idx = list(set(range(0,cv_split_len))-set(range(val_split_lower,val_split_upper)))
+                        
+                        X_train_cv = X_train.loc[train_idx, ].copy()
+                        y_train_cv = y_train.loc[train_idx, ].copy()
             
-            print('Total time for the user %.3f seconds' % sum(user_cv_time))
-            all_cv_time.append(sum(user_cv_time))
+                        X_val = X_train.loc[val_split_lower:val_split_upper, ].copy()
+                        y_val = y_train.loc[val_split_lower:val_split_upper, ].copy()
+                        
+                        y_val_pred = pd.DataFrame(y_val)
+                        y_val_pred = y_val_pred.rename(columns={truecol_name:'true'}) 
+                        
+                        for quan in quan_list:
+                            # fit on training dataset
+                            model_test = model_test.set_params(**{'alpha': quan})
+                            model_test.fit(X_train_cv, y_train_cv)
+                            
+                            # validate on validatoin dataset
+                            y_val_pred[quan] = model_test.predict(X_val)
+                            quanloss_val.append(quantile_loss(quan, y_val, y_val_pred[quan]))
+                        
+                    quanloss_val_cv.append(np.mean(quanloss_val))
+                    print(model_test)
+                    # print(mean(quanloss_val))
+                    end_cv = time()
+                    per_cv_time = end_cv - start_cv
+                    # print('%.3f seconds' % per_cv_time)
+                    user_cv_time.append(per_cv_time)
+                
+                print('Total time for the user %.3f seconds' % sum(user_cv_time))
+                all_cv_time.append(sum(user_cv_time))
+                
+                # find best model with smallest mean quantile loss
+                # print('Cross Validation Finished for One Round')
+                best_model_idx = quanloss_val_cv.index(min(quanloss_val_cv))
+                model = model_cv[best_model_idx]
+                print(model)
+                all_best_model.append(model)
             
-            # find best model with smallest mean quantile loss
-            print('Cross Validation Finished for One Round')
-            best_model_idx = quanloss_val_cv.index(min(quanloss_val_cv))
-            best_model = model_cv[best_model_idx]
-            print(best_model)
-            all_best_model.append(best_model)
-            
+            if cv_flag == False:
+                model = GradientBoostingRegressor(n_estimators=150, loss='quantile', alpha=0.5)
+                
             # return deterministic evaluation metrics using Q=0.5 as expectation value
-            best_model = best_model.fit(X_train, y_train)
-            y_test_pred = best_model.predict(X_test)
+            model = model.fit(X_train, y_train)
+            
+            y_test_pred = model.predict(X_test)
             r2_medpred = metrics.r2_score(y_test,y_test_pred)
             mae_medpred = metrics.mean_absolute_error(y_test, y_test_pred)
             rmse_medpred = np.sqrt(metrics.mean_squared_error(y_test, y_test_pred))
@@ -794,9 +826,13 @@ def predict_interval(test_feat, ev_feats, data_type, model_type, mob_flag, quan_
             y_test_pred = y_test_pred.rename(columns={truecol_name:'true'}) 
             
             for quan in quan_list:
-                best_model = model_cv[best_model_idx]
-                best_model = best_model.fit(X_train, y_train)
-                y_test_pred[quan] = best_model.predict(X_test)
+                if cv_flag == True:
+                    model = model_cv[best_model_idx]
+                else:
+                    model = GradientBoostingRegressor(n_estimators=150, loss='quantile', alpha=0.5)
+                    
+                model = model.fit(X_train, y_train)
+                y_test_pred[quan] = model.predict(X_test)
                 quan_loss_user = quantile_loss(quan, y_test, y_test_pred[quan])
                 quan_loss[quan].append(quan_loss_user)
             
@@ -805,9 +841,12 @@ def predict_interval(test_feat, ev_feats, data_type, model_type, mob_flag, quan_
             y_pred = y_pred.rename(columns={truecol_name:'true'}) 
    
             for quan in quan_list:
-                best_model = model_cv[best_model_idx]
-                best_model = best_model.fit(X_train, y_train)
-                y_pred[quan] = best_model.predict(X)
+                if cv_flag == True:
+                    model = model_cv[best_model_idx]
+                else:
+                    model = GradientBoostingRegressor(n_estimators=150, loss='quantile', alpha=0.5)
+                model = model.fit(X_train, y_train)
+                y_pred[quan] = model.predict(X)
                 
             # limit the range of prediction
             upper_limit = target_limit[1]

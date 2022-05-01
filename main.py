@@ -11,9 +11,8 @@ import pandas as pd
 from sqlalchemy import create_engine
 
 # import local scripts
-codepath = "E:/Haojun/code"
+codepath = "E:/Haojun/0_AGILE/code" # change for reproduction check
 os.chdir(codepath)
-import db_login # credential info to access the database
 import extract_mobility, extract_evfeatures
 import extract_soc, extract_arrival, extract_depart
 import predict_probablistic_results, calculate_under_overestimation, calculate_feature_importance, compare_probablistic_results
@@ -25,7 +24,7 @@ import compare_baseline_bismart as base_bi
 import compare_three_charging_onpeakdef2 as plot_threecharging
 
 # set working directory
-path = "E:/Haojun"
+path = "E:/Haojun/0_AGILE" # change for reproduction check
 os.chdir(path)
 print("Current working directory:",os.getcwd())
 
@@ -130,11 +129,15 @@ DEPART_PATH = path + '/data/inputs/depart_prediction'
 extract_depart.construct_depart_input(filtered_userlist, DEPARTMOB_PATH, DEPART_PATH) 
 
 #%% Run Quantile Regression Predictions
+# STARTING POINT FOR REPRODUCTION CHECK
+filtered_userlist = ['1', '2', '3'] # only for reproduction check
+
 data_types = ['soc', 'depart', 'arrival']
 models = ['lqr', 'qrf', 'gbqr']
 mob_flags = [True, False]
 quan_list = np.round(np.linspace(0,1,41),3).tolist()[1:-1]
 save_flag = True
+cv_flag = False
 
 all_test_feat = [['radgyr_3dayavr', 'ecar_hhindex_3dayavr',              
                   'top10locfre_3dayavr', 'avrjumplen_3dayavr', 
@@ -159,7 +162,7 @@ for test_feat in all_test_feat:
                 if not os.path.exists(PREDICTION_PATH):
                     os.makedirs(PREDICTION_PATH) 
                     
-                predict_probablistic_results.predict_interval(test_feat, ev_feats, data_type, model_type, mob_flag, quan_list, filtered_userlist, temporal_res, save_flag, INPUT_PATH, PREDICTION_PATH)
+                predict_probablistic_results.predict_interval(cv_flag, test_feat, ev_feats, data_type, model_type, mob_flag, quan_list, filtered_userlist, save_flag, INPUT_PATH, PREDICTION_PATH)
 
 #%% Evaluate Quantile Regression Predictions
 for test_feat in all_test_feat:
@@ -186,7 +189,7 @@ for test_feat in all_test_feat:
     # calculate feature importance for QRF model
     qrfmodel = 'qrf'
     for data_type in data_types:
-        EVAL_PATH = path + '/data/results_0208/predictions/'+data_type+'_prediction'+'_'+temporal_res
+        EVAL_PATH = path + '/data/results/predictions/'+data_type+'_prediction'+'_'+temporal_res
         calculate_feature_importance.compare_feat_importance(qrfmodel, mob_flags, EVAL_PATH)
     
     # output direct comparison for evaluation metrics across different models 
@@ -200,7 +203,7 @@ for test_feat in all_test_feat:
 
 #%% Simulate Charging Strategies
 # preprocess price data
-PRICE_PATH = path + '/data/inputs/auction_spot_prices_switzerland_2017.csv'
+PRICE_PATH = path + '/data/inputs/auction_spot_prices_switzerland_2017_syn.csv' # synthetic dataset for reproduction check
 price = pd.read_csv(PRICE_PATH)
 price = price[price.columns.tolist()[0:26]]
 price = price.drop(columns=['Hour 3B'])
